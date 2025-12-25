@@ -87,7 +87,7 @@ if st.session_state.analysis_active:
             maxPixels=1e9
         ).getInfo()
         
-        flooded_ha = flood_area.get('flood_detected', 0) / 10000
+        flooded_ha = flood_area.get('VV', 0) / 10000
 
     # --- 5. VISUALIZATION (Outside spinner) ---
     st.subheader(f"Flood Impact Analysis: {location_name}")
