@@ -1,1 +1,6 @@
-
+streamlit
+geemap
+earthengine-api
+folium
+pandas
+openai
