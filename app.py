@@ -3,11 +3,12 @@ import ee
 import geemap.foliumap as geemap
 import pandas as pd
 from openai import OpenAI
+from geopy.geocoders import Nominatim # The GPS Tool
 import json
 import os
 
 # --- 1. CONFIGURATION & AUTH ---
-st.set_page_config(page_title="FDEP SAR Flood Intelligence", layout="wide")
+st.set_page_config(page_title="Global Flood Intelligence", layout="wide")
 
 def auth_ee():
     try:
@@ -28,34 +29,45 @@ def auth_ee():
 auth_ee()
 
 # --- 2. SIDEBAR CONTROLS ---
-st.sidebar.title("🌊 FDEP Flood Intelligence")
-st.sidebar.info("Sentinel-1 SAR Analysis | NISAR-Ready Architecture")
+st.sidebar.title("🌍 Global Flood Intelligence")
+st.sidebar.info("Sentinel-1 SAR | Multi-Region Support")
 
-location_name = st.sidebar.text_input("Target Location", "Fort Myers, FL")
-lat = 26.64
-lon = -81.87
+# GLOBAL SEARCH BAR
+location_query = st.sidebar.text_input("Enter ANY Location (City, Country)", "Fort Myers, FL")
 
+# Geocoding Logic (The "GPS" Search)
+geolocator = Nominatim(user_agent="flood_app")
+location = geolocator.geocode(location_query)
+
+if location:
+    lat = location.latitude
+    lon = location.longitude
+    st.sidebar.success(f"📍 Found: {location.address}")
+    st.sidebar.caption(f"Lat: {lat:.4f}, Lon: {lon:.4f}")
+else:
+    st.sidebar.error("Location not found! Defaulting to Fort Myers.")
+    lat = 26.64
+    lon = -81.87
+
+# Date Selection
 st.sidebar.subheader("Analysis Window")
 before_start = st.sidebar.date_input("Before Start", value=pd.to_datetime("2022-09-01"))
 before_end = st.sidebar.date_input("Before End", value=pd.to_datetime("2022-09-15"))
 after_start = st.sidebar.date_input("After Start", value=pd.to_datetime("2022-09-29"))
 after_end = st.sidebar.date_input("After End", value=pd.to_datetime("2022-10-05"))
 
-# --- 3. SESSION STATE MANAGEMENT (The Fix) ---
-# This keeps the map alive when you use the chat
+# --- 3. SESSION STATE ---
 if 'analysis_active' not in st.session_state:
     st.session_state.analysis_active = False
 
-if st.sidebar.button("Run Flood Analysis"):
+if st.sidebar.button("Run Global Analysis"):
     st.session_state.analysis_active = True
 
 # --- 4. CORE LOGIC ---
 if st.session_state.analysis_active:
-    # We put the calculation inside a spinner so it looks nice
-    with st.spinner('Processing Sentinel-1 SAR Data...'):
+    with st.spinner(f'Scanning Satellite Data for {location_query}...'):
         roi = ee.Geometry.Point([lon, lat]).buffer(20000)
         
-        # Define SAR Layer Function
         def get_sar_layer(start, end, roi):
             return (ee.ImageCollection('COPERNICUS/S1_GRD')
                     .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
@@ -64,11 +76,9 @@ if st.session_state.analysis_active:
                     .filterDate(str(start), str(end))
                     .mosaic().clip(roi))
 
-        # Load Images
         before = get_sar_layer(before_start, before_end, roi)
         after = get_sar_layer(after_start, after_end, roi)
 
-        # Processing
         smooth_radius = 50
         before_filtered = before.focal_mean(smooth_radius, 'circle', 'meters')
         after_filtered = after.focal_mean(smooth_radius, 'circle', 'meters')
@@ -89,12 +99,13 @@ if st.session_state.analysis_active:
         
         flooded_ha = flood_area.get('VV', 0) / 10000
 
-    # --- 5. VISUALIZATION (Outside spinner) ---
-    st.subheader(f"Flood Impact Analysis: {location_name}")
+    # --- 5. VISUALIZATION ---
+    st.subheader(f"Flood Analysis: {location_query}")
     
+    # Map now centers on the SEARCHED location
     m = geemap.Map(center=[lat, lon], zoom=11)
-    m.add_layer(before_filtered, {'min': -25, 'max': 0}, 'Before Storm (SAR)')
-    m.add_layer(after_filtered, {'min': -25, 'max': 0}, 'After Storm (SAR)')
+    m.add_layer(before_filtered, {'min': -25, 'max': 0}, 'Before (SAR)')
+    m.add_layer(after_filtered, {'min': -25, 'max': 0}, 'After (SAR)')
     m.add_layer(flood_final, {'palette': ['red']}, 'FLOOD EXTENT')
     m.to_streamlit(height=600)
     
@@ -102,7 +113,7 @@ if st.session_state.analysis_active:
     
     # --- 6. AI ASSISTANT ---
     st.divider()
-    st.subheader("🤖 AI Impact Assessment")
+    st.subheader(" Global AI Impact Assessment")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -111,15 +122,18 @@ if st.session_state.analysis_active:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask about this flood event..."):
+    if prompt := st.chat_input("Ask about this area..."):
         st.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
+        # Enhanced Prompt for Global Context
         system_context = f"""
-        You are an expert Flood Response Analyst for FDEP.
-        Context: Location {location_name}.
-        Data: {flooded_ha:.2f} hectares of detected flood water.
+        You are an expert International Flood Response Analyst.
+        Target Area: {location_query} (Lat: {lat}, Lon: {lon}).
+        Data: {flooded_ha:.2f} hectares flooded.
         User Question: {prompt}
+        
+        If the location is a major city, mention specific infrastructure that might be at risk based on the coordinates.
         """
 
         try:
@@ -139,4 +153,4 @@ if st.session_state.analysis_active:
             st.error(f"AI Error: {e}")
 
 else:
-    st.write("👈 Set parameters and click 'Run Flood Analysis' to start.")
+    st.write("👈 Enter a city name (e.g., 'London' or 'Mumbai') and click 'Run Global Analysis'.")
