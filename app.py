@@ -9,7 +9,7 @@ import os
 import datetime
 
 # --- 1. CONFIGURATION & AUTH ---
-st.set_page_config(page_title="Global Flood Intelligence", layout="wide")
+st.set_page_config(page_title="FDEP Flood Intelligence Platform", layout="wide")
 
 def auth_ee():
     try:
@@ -29,188 +29,154 @@ def auth_ee():
 
 auth_ee()
 
-# --- 2. THE EVENT LIBRARY ---
-flood_events = {
-    "Custom Location (Manual Input)": {"lat": 0, "lon": 0, "dates": []},
-    "Hurricane Ian (Fort Myers, FL)": {
-        "lat": 26.64, "lon": -81.87, 
-        "dates": ["2022-09-01", "2022-09-15", "2022-09-29", "2022-10-05"]
+# --- 2. THE FLOOD ARCHIVE (DATA DICTIONARY) ---
+# This serves as your "Database" of events
+flood_archive = {
+    "2024": {
+        "San Diego Flash Floods (Jan)": {"lat": 32.71, "lon": -117.16, "dates": ["2023-12-01", "2024-01-15", "2024-01-22", "2024-01-30"]},
+        "Houston Floods (May)": {"lat": 29.76, "lon": -95.36, "dates": ["2024-04-01", "2024-04-15", "2024-05-02", "2024-05-10"]}
     },
-    "Pakistan Floods (Sindh)": {
-        "lat": 26.90, "lon": 68.10, 
-        "dates": ["2022-08-01", "2022-08-10", "2022-08-20", "2022-08-30"]
+    "2023": {
+        "Fort Lauderdale Flash Flood (Apr)": {"lat": 26.12, "lon": -80.14, "dates": ["2023-03-01", "2023-04-01", "2023-04-13", "2023-04-20"]},
+        "Vermont Floods (Jul)": {"lat": 44.26, "lon": -72.57, "dates": ["2023-06-01", "2023-07-01", "2023-07-11", "2023-07-20"]},
+        "Libya Dam Collapse (Sep)": {"lat": 32.76, "lon": 22.63, "dates": ["2023-08-01", "2023-09-01", "2023-09-12", "2023-09-20"]}
     },
-    "Libya Dam Collapse (Derna)": {
-        "lat": 32.76, "lon": 22.63, 
-        "dates": ["2023-08-01", "2023-09-01", "2023-09-12", "2023-09-20"]
+    "2022": {
+        "Hurricane Ian (Florida)": {"lat": 26.64, "lon": -81.87, "dates": ["2022-09-01", "2022-09-15", "2022-09-29", "2022-10-05"]},
+        "Pakistan Floods (Sindh)": {"lat": 26.90, "lon": 68.10, "dates": ["2022-08-01", "2022-08-10", "2022-08-20", "2022-08-30"]},
+        "Yellowstone Floods (Jun)": {"lat": 45.03, "lon": -110.70, "dates": ["2022-05-01", "2022-06-01", "2022-06-13", "2022-06-25"]}
     },
-    "California Atmospheric River (Sacramento)": {
-        "lat": 38.58, "lon": -121.49,
-        "dates": ["2022-12-01", "2022-12-15", "2023-01-05", "2023-01-15"]
+    "2021": {
+        "Hurricane Ida (Louisiana)": {"lat": 29.59, "lon": -90.71, "dates": ["2021-08-01", "2021-08-20", "2021-08-30", "2021-09-10"]},
+        "Germany/Belgium Floods": {"lat": 50.47, "lon": 6.85, "dates": ["2021-06-01", "2021-07-10", "2021-07-15", "2021-07-25"]}
+    },
+    "2020": {
+        "Hurricane Sally (Pensacola)": {"lat": 30.42, "lon": -87.21, "dates": ["2020-08-15", "2020-09-10", "2020-09-17", "2020-09-25"]},
+        "Midland Dam Failure (Michigan)": {"lat": 43.61, "lon": -84.22, "dates": ["2020-05-01", "2020-05-15", "2020-05-20", "2020-05-30"]}
     }
 }
 
 # --- 3. SIDEBAR CONTROLS ---
-st.sidebar.title("🌍 Global Flood Intelligence")
+st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Flag_of_Florida.svg/320px-Flag_of_Florida.svg.png", width=50)
+st.sidebar.title("FDEP Flood Intelligence")
 
-# A. EVENT SELECTOR
-selected_event = st.sidebar.selectbox("Select a Historical Event", list(flood_events.keys()))
+# A. HIERARCHICAL DROPDOWNS
+st.sidebar.header("1. Event Selection")
+selected_year = st.sidebar.selectbox("Select Year", list(flood_archive.keys()))
+event_list = list(flood_archive[selected_year].keys())
+selected_event_name = st.sidebar.selectbox("Select Major Event", event_list)
 
-if selected_event != "Custom Location (Manual Input)":
-    # Auto-fill params
-    params = flood_events[selected_event]
-    lat = params["lat"]
-    lon = params["lon"]
-    # FIXED: Convert to simple date objects to avoid "00:00:00" error
-    d = [pd.to_datetime(x).date() for x in params["dates"]]
-    
-    st.sidebar.info(f"📍 Loaded: {selected_event}")
-    location_query = selected_event
-    
-    # Auto-set dates
-    before_start, before_end, after_start, after_end = d[0], d[1], d[2], d[3]
+# Load Params
+params = flood_archive[selected_year][selected_event_name]
+lat, lon = params["lat"], params["lon"]
+d = [pd.to_datetime(x).date() for x in params["dates"]]
 
-else:
-    # Manual Mode
-    location_query = st.sidebar.text_input("Enter Location (City, Country)", "New Orleans, USA")
-    geolocator = Nominatim(user_agent="flood_app")
-    location = geolocator.geocode(location_query)
-    if location:
-        lat, lon = location.latitude, location.longitude
-        st.sidebar.success(f"📍 Found: {location.address}")
-    else:
-        st.sidebar.error("Location not found.")
-        lat, lon = 26.64, -81.87
-        
-    st.sidebar.subheader("Date Selection")
-    before_start = st.sidebar.date_input("Before Start", pd.to_datetime("2022-09-01").date())
-    before_end = st.sidebar.date_input("Before End", pd.to_datetime("2022-09-15").date())
-    after_start = st.sidebar.date_input("After Start", pd.to_datetime("2022-09-29").date())
-    after_end = st.sidebar.date_input("After End", pd.to_datetime("2022-10-05").date())
+# B. DATE & LOCATION OVERRIDE
+with st.sidebar.expander("Advanced Settings / Custom Dates"):
+    location_query = st.text_input("Location Name", selected_event_name)
+    col1, col2 = st.columns(2)
+    before_start = col1.date_input("Before Start", d[0])
+    before_end = col2.date_input("Before End", d[1])
+    after_start = col1.date_input("After Start", d[2])
+    after_end = col2.date_input("After End", d[3])
 
-# B. SATELLITE SELECTOR
-sensor_type = st.sidebar.radio("Select Satellite Sensor", ["Sentinel-1 (Radar)", "Sentinel-2 (Optical)"])
+# C. SENSOR & LAYERS
+st.sidebar.header("2. Sensor & Layers")
+sensor_type = st.sidebar.radio("Select Satellite", ["Sentinel-1 (Radar)", "Sentinel-2 (Optical)"])
+show_fdep = st.sidebar.checkbox("Overlay FDEP Conservation Lands", value=False)
 
 # --- 4. EXECUTION ---
 if 'analysis_active' not in st.session_state:
     st.session_state.analysis_active = False
 
-if st.sidebar.button("Run Global Analysis"):
+if st.sidebar.button("Run Analysis", type="primary"):
     st.session_state.analysis_active = True
 
 if st.session_state.analysis_active:
-    with st.spinner(f'Processing {sensor_type} data for {location_query}...'):
+    # Main Dashboard Area
+    st.subheader(f"Analysis: {selected_event_name} ({selected_year})")
+    
+    with st.spinner('Accessing Satellite Data & FDEP Servers...'):
         roi = ee.Geometry.Point([lon, lat]).buffer(20000)
         m = geemap.Map(center=[lat, lon], zoom=11)
         flooded_ha = 0
         
-        # Helper to safely stringify dates
         def dstr(d): return d.strftime("%Y-%m-%d")
 
-        # --- LOGIC FOR SENTINEL-1 (RADAR) ---
+        # --- FDEP INTEGRATION (THE CHERRY ON TOP) ---
+        if show_fdep:
+            try:
+                # FDEP Map Direct Public Service (Conservation Lands)
+                fdep_url = "https://ca.dep.state.fl.us/arcgis/rest/services/OpenData/DSL_Cons_Lands/MapServer"
+                m.add_esri_layer(fdep_url, name="FDEP Conservation Lands", opacity=0.6)
+                st.toast("FDEP Data Layer Loaded Successfully!", icon="✅")
+            except:
+                st.warning("Could not connect to FDEP Map Direct Server. Showing standard map.")
+
+        # --- SATELLITE PROCESSING ---
         if sensor_type == "Sentinel-1 (Radar)":
-            def get_sar(start, end):
-                return (ee.ImageCollection('COPERNICUS/S1_GRD')
-                        .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
-                        .filter(ee.Filter.eq('instrumentMode', 'IW'))
-                        .filterBounds(roi)
-                        .filterDate(dstr(start), dstr(end))
-                        .mosaic().clip(roi))
+            collection = ee.ImageCollection('COPERNICUS/S1_GRD').filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).filter(ee.Filter.eq('instrumentMode', 'IW')).filterBounds(roi)
+            before = collection.filterDate(dstr(before_start), dstr(before_end)).mosaic().clip(roi)
+            after = collection.filterDate(dstr(after_start), dstr(after_end)).mosaic().clip(roi)
 
-            before = get_sar(before_start, before_end)
-            after = get_sar(after_start, after_end)
-
-            # Process
-            before_smooth = before.focal_mean(50, 'circle', 'meters')
-            after_smooth = after.focal_mean(50, 'circle', 'meters')
-            diff = after_smooth.divide(before_smooth)
+            # Detect Flood
+            diff = after.focal_mean(50).divide(before.focal_mean(50))
+            flood_mask = diff.select('VV').lt(0.8)
+            flood_final = flood_mask.updateMask(before.select('VV').gt(-15)).selfMask()
             
-            # Flood Mask
-            threshold = 0.8
-            flood_mask = diff.select('VV').lt(threshold)
-            perm_water = before_smooth.select('VV').gt(-15)
-            flood_final = flood_mask.updateMask(perm_water).selfMask()
-            
-            # Add to Map
-            m.add_layer(before_smooth, {'min': -25, 'max': 0}, 'Before (SAR)')
-            m.add_layer(after_smooth, {'min': -25, 'max': 0}, 'After (SAR)')
+            m.add_layer(before, {'min': -25, 'max': 0}, 'Before Storm')
+            m.add_layer(after, {'min': -25, 'max': 0}, 'After Storm')
             m.add_layer(flood_final, {'palette': ['red']}, 'FLOOD DETECTED')
             
             # Stats
-            area = flood_final.multiply(ee.Image.pixelArea()).reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=roi, scale=10, maxPixels=1e9
-            ).getInfo()
+            area = flood_final.multiply(ee.Image.pixelArea()).reduceRegion(ee.Reducer.sum(), roi, 10).getInfo()
             flooded_ha = area.get('VV', 0) / 10000
+            
+            # --- DOWNLOAD FEATURE ---
+            try:
+                download_url = flood_final.getDownloadURL({
+                    'name': f'Flood_Mask_{selected_year}_{selected_event_name.split()[0]}',
+                    'scale': 30,
+                    'region': roi
+                })
+                st.sidebar.markdown(f"### 📥 Download Results")
+                st.sidebar.link_button("Download Flood GeoTIFF", download_url)
+            except:
+                pass
 
-        # --- LOGIC FOR SENTINEL-2 (OPTICAL) ---
         else:
-            def get_optical(start, end):
-                return (ee.ImageCollection('COPERNICUS/S2_SR')
-                        .filterBounds(roi)
-                        .filterDate(dstr(start), dstr(end))
-                        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
-                        .median().clip(roi)) 
-            
-            before_opt = get_optical(before_start, before_end)
-            after_opt = get_optical(after_start, after_end)
-            
-            vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2']} # True Color
-            m.add_layer(before_opt, vis_params, 'Before (Optical)')
-            m.add_layer(after_opt, vis_params, 'After (Optical)')
-            
-            st.warning("⚠️ Note: Optical Flood Detection is visual only. Use Radar for accurate calculations.")
-            flooded_ha = 0
+            # Optical Logic
+            collection = ee.ImageCollection('COPERNICUS/S2_SR').filterBounds(roi).filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+            before = collection.filterDate(dstr(before_start), dstr(before_end)).median().clip(roi)
+            after = collection.filterDate(dstr(after_start), dstr(after_end)).median().clip(roi)
+            vis = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2']}
+            m.add_layer(before, vis, 'Before (Optical)')
+            m.add_layer(after, vis, 'After (Optical)')
 
-    # --- 5. VISUALIZATION ---
-    st.subheader(f"Analysis: {location_query} | Sensor: {sensor_type}")
+    # Display Map
     m.to_streamlit(height=600)
     
     if sensor_type == "Sentinel-1 (Radar)":
         st.success(f"🛑 Detected Flood Extent: {flooded_ha:.2f} Hectares")
-    
-    # --- 6. AI ASSISTANT ---
+
+    # --- AI SECTION ---
     st.divider()
-    st.subheader("🤖 AI Intelligence")
+    st.subheader("🤖 AI Situation Report")
+    
+    if "messages" not in st.session_state: st.session_state.messages = []
+    for msg in st.session_state.messages: st.chat_message(msg["role"]).write(msg["content"])
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if prompt := st.chat_input("Ask for details..."):
-        st.chat_message("user").markdown(prompt)
+    if prompt := st.chat_input("Ask about this event..."):
+        st.chat_message("user").write(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        system_context = f"""
-        You are a Global Disaster Response Specialist.
-        Current Event: {selected_event}
-        Location Coordinates: {lat}, {lon}
-        Sensor Data: {flooded_ha:.2f} ha flooded.
+        context = f"Event: {selected_event_name} ({selected_year}). Flooded Area: {flooded_ha} ha. User: {prompt}"
         
-        User Question: {prompt}
-        
-        Task: 
-        1. If the user asks for locations, use your internal knowledge of the coordinates ({lat}, {lon}) to name nearby cities, rivers, or landmarks.
-        2. Provide a strategic assessment of the situation.
-        """
-
         try:
             client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_context},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            ai_response = response.choices[0].message.content
-            with st.chat_message("assistant"):
-                st.markdown(ai_response)
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
+            response = client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "system", "content": context}, {"role": "user", "content": prompt}])
+            reply = response.choices[0].message.content
+            st.chat_message("assistant").write(reply)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
         except Exception as e:
             st.error(f"AI Error: {e}")
-
-else:
-    st.write("👈 Select an Event or enter a custom location.")
