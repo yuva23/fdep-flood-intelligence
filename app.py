@@ -6,6 +6,7 @@ from openai import OpenAI
 from geopy.geocoders import Nominatim
 import json
 import os
+import datetime
 
 # --- 1. CONFIGURATION & AUTH ---
 st.set_page_config(page_title="Global Flood Intelligence", layout="wide")
@@ -29,7 +30,6 @@ def auth_ee():
 auth_ee()
 
 # --- 2. THE EVENT LIBRARY ---
-# This dictionary holds the data for your presets
 flood_events = {
     "Custom Location (Manual Input)": {"lat": 0, "lon": 0, "dates": []},
     "Hurricane Ian (Fort Myers, FL)": {
@@ -38,7 +38,7 @@ flood_events = {
     },
     "Pakistan Floods (Sindh)": {
         "lat": 26.90, "lon": 68.10, 
-        "dates": ["2022-06-01", "2022-06-30", "2022-08-20", "2022-08-30"]
+        "dates": ["2022-08-01", "2022-08-10", "2022-08-20", "2022-08-30"]
     },
     "Libya Dam Collapse (Derna)": {
         "lat": 32.76, "lon": 22.63, 
@@ -46,7 +46,7 @@ flood_events = {
     },
     "California Atmospheric River (Sacramento)": {
         "lat": 38.58, "lon": -121.49,
-        "dates": ["2022-12-01", "2022-12-25", "2023-01-05", "2023-01-15"]
+        "dates": ["2022-12-01", "2022-12-15", "2023-01-05", "2023-01-15"]
     }
 }
 
@@ -57,13 +57,13 @@ st.sidebar.title("🌍 Global Flood Intelligence")
 selected_event = st.sidebar.selectbox("Select a Historical Event", list(flood_events.keys()))
 
 if selected_event != "Custom Location (Manual Input)":
-    # Auto-fill params from dictionary
+    # Auto-fill params
     params = flood_events[selected_event]
     lat = params["lat"]
     lon = params["lon"]
-    d = [pd.to_datetime(x) for x in params["dates"]]
+    # FIXED: Convert to simple date objects to avoid "00:00:00" error
+    d = [pd.to_datetime(x).date() for x in params["dates"]]
     
-    # We still show the search bar but disable it or just show the name
     st.sidebar.info(f"📍 Loaded: {selected_event}")
     location_query = selected_event
     
@@ -83,10 +83,10 @@ else:
         lat, lon = 26.64, -81.87
         
     st.sidebar.subheader("Date Selection")
-    before_start = st.sidebar.date_input("Before Start", pd.to_datetime("2022-09-01"))
-    before_end = st.sidebar.date_input("Before End", pd.to_datetime("2022-09-15"))
-    after_start = st.sidebar.date_input("After Start", pd.to_datetime("2022-09-29"))
-    after_end = st.sidebar.date_input("After End", pd.to_datetime("2022-10-05"))
+    before_start = st.sidebar.date_input("Before Start", pd.to_datetime("2022-09-01").date())
+    before_end = st.sidebar.date_input("Before End", pd.to_datetime("2022-09-15").date())
+    after_start = st.sidebar.date_input("After Start", pd.to_datetime("2022-09-29").date())
+    after_end = st.sidebar.date_input("After End", pd.to_datetime("2022-10-05").date())
 
 # B. SATELLITE SELECTOR
 sensor_type = st.sidebar.radio("Select Satellite Sensor", ["Sentinel-1 (Radar)", "Sentinel-2 (Optical)"])
@@ -104,6 +104,9 @@ if st.session_state.analysis_active:
         m = geemap.Map(center=[lat, lon], zoom=11)
         flooded_ha = 0
         
+        # Helper to safely stringify dates
+        def dstr(d): return d.strftime("%Y-%m-%d")
+
         # --- LOGIC FOR SENTINEL-1 (RADAR) ---
         if sensor_type == "Sentinel-1 (Radar)":
             def get_sar(start, end):
@@ -111,7 +114,7 @@ if st.session_state.analysis_active:
                         .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
                         .filter(ee.Filter.eq('instrumentMode', 'IW'))
                         .filterBounds(roi)
-                        .filterDate(str(start), str(end))
+                        .filterDate(dstr(start), dstr(end))
                         .mosaic().clip(roi))
 
             before = get_sar(before_start, before_end)
@@ -144,9 +147,9 @@ if st.session_state.analysis_active:
             def get_optical(start, end):
                 return (ee.ImageCollection('COPERNICUS/S2_SR')
                         .filterBounds(roi)
-                        .filterDate(str(start), str(end))
+                        .filterDate(dstr(start), dstr(end))
                         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
-                        .median().clip(roi)) # Use median to remove clouds
+                        .median().clip(roi)) 
             
             before_opt = get_optical(before_start, before_end)
             after_opt = get_optical(after_start, after_end)
@@ -156,7 +159,7 @@ if st.session_state.analysis_active:
             m.add_layer(after_opt, vis_params, 'After (Optical)')
             
             st.warning("⚠️ Note: Optical Flood Detection is visual only. Use Radar for accurate calculations.")
-            flooded_ha = 0 # We don't calculate area for optical yet
+            flooded_ha = 0
 
     # --- 5. VISUALIZATION ---
     st.subheader(f"Analysis: {location_query} | Sensor: {sensor_type}")
@@ -183,8 +186,8 @@ if st.session_state.analysis_active:
         system_context = f"""
         You are a Global Disaster Response Specialist.
         Current Event: {selected_event}
-        Location: {lat}, {lon}
-        Sensor Data: {flooded_ha:.2f} ha flooded (if 0, data is optical/visual only).
+        Location Coordinates: {lat}, {lon}
+        Sensor Data: {flooded_ha:.2f} ha flooded.
         
         User Question: {prompt}
         
