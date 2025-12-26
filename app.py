@@ -3,13 +3,12 @@ import ee
 import geemap.foliumap as geemap
 import pandas as pd
 from openai import OpenAI
-from geopy.geocoders import Nominatim
 import json
 import os
 import datetime
 
 # --- 1. CONFIGURATION & AUTH ---
-st.set_page_config(page_title="FDEP Flood Intelligence Platform", layout="wide")
+st.set_page_config(page_title="Global Flood Intelligence", layout="wide")
 
 def auth_ee():
     try:
@@ -29,8 +28,8 @@ def auth_ee():
 
 auth_ee()
 
-# --- 2. THE FLOOD ARCHIVE (DATA DICTIONARY) ---
-# This serves as your "Database" of events
+# --- 2. DATA ARCHIVE (SIMPLE STRINGS ONLY) ---
+# We store dates as simple strings to avoid the "00:00:00" error
 flood_archive = {
     "2024": {
         "San Diego Flash Floods (Jan)": {"lat": 32.71, "lon": -117.16, "dates": ["2023-12-01", "2024-01-15", "2024-01-22", "2024-01-30"]},
@@ -38,86 +37,88 @@ flood_archive = {
     },
     "2023": {
         "Fort Lauderdale Flash Flood (Apr)": {"lat": 26.12, "lon": -80.14, "dates": ["2023-03-01", "2023-04-01", "2023-04-13", "2023-04-20"]},
-        "Vermont Floods (Jul)": {"lat": 44.26, "lon": -72.57, "dates": ["2023-06-01", "2023-07-01", "2023-07-11", "2023-07-20"]},
         "Libya Dam Collapse (Sep)": {"lat": 32.76, "lon": 22.63, "dates": ["2023-08-01", "2023-09-01", "2023-09-12", "2023-09-20"]}
     },
     "2022": {
         "Hurricane Ian (Florida)": {"lat": 26.64, "lon": -81.87, "dates": ["2022-09-01", "2022-09-15", "2022-09-29", "2022-10-05"]},
         "Pakistan Floods (Sindh)": {"lat": 26.90, "lon": 68.10, "dates": ["2022-08-01", "2022-08-10", "2022-08-20", "2022-08-30"]},
-        "Yellowstone Floods (Jun)": {"lat": 45.03, "lon": -110.70, "dates": ["2022-05-01", "2022-06-01", "2022-06-13", "2022-06-25"]}
-    },
-    "2021": {
-        "Hurricane Ida (Louisiana)": {"lat": 29.59, "lon": -90.71, "dates": ["2021-08-01", "2021-08-20", "2021-08-30", "2021-09-10"]},
-        "Germany/Belgium Floods": {"lat": 50.47, "lon": 6.85, "dates": ["2021-06-01", "2021-07-10", "2021-07-15", "2021-07-25"]}
-    },
-    "2020": {
-        "Hurricane Sally (Pensacola)": {"lat": 30.42, "lon": -87.21, "dates": ["2020-08-15", "2020-09-10", "2020-09-17", "2020-09-25"]},
-        "Midland Dam Failure (Michigan)": {"lat": 43.61, "lon": -84.22, "dates": ["2020-05-01", "2020-05-15", "2020-05-20", "2020-05-30"]}
+        "California Atmospheric River": {"lat": 38.58, "lon": -121.49, "dates": ["2022-12-01", "2022-12-15", "2023-01-05", "2023-01-15"]}
     }
 }
 
 # --- 3. SIDEBAR CONTROLS ---
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Flag_of_Florida.svg/320px-Flag_of_Florida.svg.png", width=50)
-st.sidebar.title("FDEP Flood Intelligence")
+st.sidebar.title("🌍 Global Flood Intelligence")
 
-# A. HIERARCHICAL DROPDOWNS
-st.sidebar.header("1. Event Selection")
-selected_year = st.sidebar.selectbox("Select Year", list(flood_archive.keys()))
+# A. EVENT SELECTION
+st.sidebar.header("1. Select Event")
+selected_year = st.sidebar.selectbox("Year", list(flood_archive.keys()))
 event_list = list(flood_archive[selected_year].keys())
-selected_event_name = st.sidebar.selectbox("Select Major Event", event_list)
+selected_event_name = st.sidebar.selectbox("Event", event_list)
 
 # Load Params
 params = flood_archive[selected_year][selected_event_name]
 lat, lon = params["lat"], params["lon"]
-d = [pd.to_datetime(x).date() for x in params["dates"]]
 
-# B. DATE & LOCATION OVERRIDE
-with st.sidebar.expander("Advanced Settings / Custom Dates"):
-    location_query = st.text_input("Location Name", selected_event_name)
+# Helper to force dates to simple strings
+def make_date_obj(date_str):
+    return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+
+default_dates = [make_date_obj(x) for x in params["dates"]]
+
+# B. DATE SELECTION (The Fix)
+with st.sidebar.expander("📅 Date Settings", expanded=True):
     col1, col2 = st.columns(2)
-    before_start = col1.date_input("Before Start", d[0])
-    before_end = col2.date_input("Before End", d[1])
-    after_start = col1.date_input("After Start", d[2])
-    after_end = col2.date_input("After End", d[3])
+    d1 = col1.date_input("Before Start", default_dates[0])
+    d2 = col2.date_input("Before End", default_dates[1])
+    d3 = col1.date_input("After Start", default_dates[2])
+    d4 = col2.date_input("After End", default_dates[3])
 
 # C. SENSOR & LAYERS
 st.sidebar.header("2. Sensor & Layers")
-sensor_type = st.sidebar.radio("Select Satellite", ["Sentinel-1 (Radar)", "Sentinel-2 (Optical)"])
+sensor_type = st.sidebar.radio("Satellite", ["Sentinel-1 (Radar)", "Sentinel-2 (Optical)"])
 show_fdep = st.sidebar.checkbox("Overlay FDEP Conservation Lands", value=False)
 
 # --- 4. EXECUTION ---
 if 'analysis_active' not in st.session_state:
     st.session_state.analysis_active = False
 
-if st.sidebar.button("Run Analysis", type="primary"):
+if st.sidebar.button("Run Global Analysis", type="primary"):
     st.session_state.analysis_active = True
 
 if st.session_state.analysis_active:
-    # Main Dashboard Area
-    st.subheader(f"Analysis: {selected_event_name} ({selected_year})")
+    st.subheader(f"Analysis: {selected_event_name}")
     
-    with st.spinner('Accessing Satellite Data & FDEP Servers...'):
+    with st.spinner('Processing Satellite Data...'):
         roi = ee.Geometry.Point([lon, lat]).buffer(20000)
-        m = geemap.Map(center=[lat, lon], zoom=11)
+        m = geemap.Map(center=[lat, lon], zoom=10)
         flooded_ha = 0
         
-        def dstr(d): return d.strftime("%Y-%m-%d")
+        # CRITICAL FIX: Convert Date Objects back to String before sending to Google
+        start_b_str = d1.strftime("%Y-%m-%d")
+        end_b_str = d2.strftime("%Y-%m-%d")
+        start_a_str = d3.strftime("%Y-%m-%d")
+        end_a_str = d4.strftime("%Y-%m-%d")
 
-        # --- FDEP INTEGRATION (THE CHERRY ON TOP) ---
+        # FDEP Layer
         if show_fdep:
             try:
-                # FDEP Map Direct Public Service (Conservation Lands)
                 fdep_url = "https://ca.dep.state.fl.us/arcgis/rest/services/OpenData/DSL_Cons_Lands/MapServer"
                 m.add_esri_layer(fdep_url, name="FDEP Conservation Lands", opacity=0.6)
-                st.toast("FDEP Data Layer Loaded Successfully!", icon="✅")
             except:
-                st.warning("Could not connect to FDEP Map Direct Server. Showing standard map.")
+                st.warning("Could not load FDEP layer.")
 
-        # --- SATELLITE PROCESSING ---
+        # SENTINEL-1 (RADAR)
         if sensor_type == "Sentinel-1 (Radar)":
-            collection = ee.ImageCollection('COPERNICUS/S1_GRD').filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).filter(ee.Filter.eq('instrumentMode', 'IW')).filterBounds(roi)
-            before = collection.filterDate(dstr(before_start), dstr(before_end)).mosaic().clip(roi)
-            after = collection.filterDate(dstr(after_start), dstr(after_end)).mosaic().clip(roi)
+            def get_sar(start, end):
+                return (ee.ImageCollection('COPERNICUS/S1_GRD')
+                        .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+                        .filter(ee.Filter.eq('instrumentMode', 'IW'))
+                        .filterBounds(roi)
+                        .filterDate(start, end) # Passing clean strings now
+                        .mosaic().clip(roi))
+
+            before = get_sar(start_b_str, end_b_str)
+            after = get_sar(start_a_str, end_a_str)
 
             # Detect Flood
             diff = after.focal_mean(50).divide(before.focal_mean(50))
@@ -129,31 +130,32 @@ if st.session_state.analysis_active:
             m.add_layer(flood_final, {'palette': ['red']}, 'FLOOD DETECTED')
             
             # Stats
-            area = flood_final.multiply(ee.Image.pixelArea()).reduceRegion(ee.Reducer.sum(), roi, 10).getInfo()
+            area = flood_final.multiply(ee.Image.pixelArea()).reduceRegion(
+                reducer=ee.Reducer.sum(), geometry=roi, scale=10, maxPixels=1e9
+            ).getInfo()
             flooded_ha = area.get('VV', 0) / 10000
             
-            # --- DOWNLOAD FEATURE ---
+            # Download Button
             try:
-                download_url = flood_final.getDownloadURL({
-                    'name': f'Flood_Mask_{selected_year}_{selected_event_name.split()[0]}',
-                    'scale': 30,
-                    'region': roi
-                })
-                st.sidebar.markdown(f"### 📥 Download Results")
-                st.sidebar.link_button("Download Flood GeoTIFF", download_url)
-            except:
-                pass
+                url = flood_final.getDownloadURL({'name': 'flood_map', 'scale': 30, 'region': roi})
+                st.sidebar.markdown(f"[📥 **Download GeoTIFF**]({url})")
+            except: pass
 
+        # SENTINEL-2 (OPTICAL)
         else:
-            # Optical Logic
-            collection = ee.ImageCollection('COPERNICUS/S2_SR').filterBounds(roi).filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
-            before = collection.filterDate(dstr(before_start), dstr(before_end)).median().clip(roi)
-            after = collection.filterDate(dstr(after_start), dstr(after_end)).median().clip(roi)
+            def get_opt(start, end):
+                return (ee.ImageCollection('COPERNICUS/S2_SR')
+                        .filterBounds(roi)
+                        .filterDate(start, end)
+                        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+                        .median().clip(roi))
+            
+            before = get_opt(start_b_str, end_b_str)
+            after = get_opt(start_a_str, end_a_str)
             vis = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2']}
             m.add_layer(before, vis, 'Before (Optical)')
             m.add_layer(after, vis, 'After (Optical)')
 
-    # Display Map
     m.to_streamlit(height=600)
     
     if sensor_type == "Sentinel-1 (Radar)":
@@ -170,7 +172,7 @@ if st.session_state.analysis_active:
         st.chat_message("user").write(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
         
-        context = f"Event: {selected_event_name} ({selected_year}). Flooded Area: {flooded_ha} ha. User: {prompt}"
+        context = f"Event: {selected_event_name}. Flooded: {flooded_ha:.2f} ha. User Question: {prompt}"
         
         try:
             client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
