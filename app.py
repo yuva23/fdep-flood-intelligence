@@ -22,7 +22,7 @@ def auth_ee():
                 token_content = json.dumps(token_content)
             with open(os.path.join(credentials_path, "credentials"), "w") as f:
                 f.write(token_content)
-            ee.Initialize(project='flood-intelligence-gee-12345')
+            ee.Initialize()
         else:
             raise
 
