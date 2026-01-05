@@ -12,20 +12,35 @@ st.set_page_config(page_title="FDEP Flood Intelligence", layout="wide")
 
 def auth_ee():
     try:
-        # Try initializing with default credentials
+        # Attempt 1: Try default initialization
         ee.Initialize()
     except Exception:
-        # If that fails, manually rebuild credentials from Streamlit Secrets
+        # Attempt 2: Use the secret token and extract the Project ID
         if "EARTHENGINE_TOKEN" in st.secrets:
             credentials_path = os.path.expanduser("~/.config/earthengine/")
             os.makedirs(credentials_path, exist_ok=True)
+            
             token_content = st.secrets["EARTHENGINE_TOKEN"]
             if not isinstance(token_content, str):
                 token_content = json.dumps(token_content)
+            
+            # Save credentials for the library to find
             with open(os.path.join(credentials_path, "credentials"), "w") as f:
                 f.write(token_content)
-            ee.Initialize()
+            
+            # CRITICAL FIX: Extract the Project ID from the token automatically
+            try:
+                token_dict = json.loads(token_content)
+                project_id = token_dict.get("project_id")
+                if project_id:
+                    ee.Initialize(project=project_id)
+                else:
+                    # Fallback if no project_id in JSON
+                    ee.Initialize()
+            except:
+                ee.Initialize()
         else:
+            st.error("Earth Engine Token not found in Secrets!")
             raise
 
 auth_ee()
