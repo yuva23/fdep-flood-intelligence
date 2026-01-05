@@ -12,36 +12,51 @@ st.set_page_config(page_title="FDEP Flood Intelligence", layout="wide")
 
 def auth_ee():
     try:
-        # Attempt 1: Try default initialization
+        # Attempt 1: Try default initialization (works in some envs)
         ee.Initialize()
     except Exception:
-        # Attempt 2: Use the secret token and extract the Project ID
+        # Attempt 2: Load credentials from Secrets
         if "EARTHENGINE_TOKEN" in st.secrets:
+            # A. Set up the credentials file
             credentials_path = os.path.expanduser("~/.config/earthengine/")
             os.makedirs(credentials_path, exist_ok=True)
-            
             token_content = st.secrets["EARTHENGINE_TOKEN"]
+            
+            # Ensure it is a string before writing
             if not isinstance(token_content, str):
                 token_content = json.dumps(token_content)
             
-            # Save credentials for the library to find
             with open(os.path.join(credentials_path, "credentials"), "w") as f:
                 f.write(token_content)
             
-            # CRITICAL FIX: Extract the Project ID from the token automatically
-            try:
-                token_dict = json.loads(token_content)
-                project_id = token_dict.get("project_id")
-                if project_id:
+            # B. Get the Project ID (CRITICAL STEP)
+            # We look for the new secret first
+            project_id = st.secrets.get("GOOGLE_PROJECT_ID")
+            
+            # If not in secrets, try to parse it from the token (fallback)
+            if not project_id:
+                try:
+                    token_dict = json.loads(token_content)
+                    project_id = token_dict.get("project_id")
+                except:
+                    pass
+
+            # C. Initialize with the explicit Project ID
+            if project_id:
+                try:
                     ee.Initialize(project=project_id)
-                else:
-                    # Fallback if no project_id in JSON
+                except Exception as e:
+                    st.error(f"Authentication Failed: Could not initialize with project '{project_id}'. Error: {e}")
+            else:
+                # Last resort: Try initializing without project (often fails on free tier)
+                try:
                     ee.Initialize()
-            except:
-                ee.Initialize()
+                except Exception as e:
+                    st.error(f"Critical Error: No 'GOOGLE_PROJECT_ID' found in Secrets. Please add it to your Streamlit Secrets.")
+                    st.stop()
         else:
-            st.error("Earth Engine Token not found in Secrets!")
-            raise
+            st.error("EARTHENGINE_TOKEN not found in Secrets!")
+            st.stop()
 
 auth_ee()
 
