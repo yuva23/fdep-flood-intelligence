@@ -12,7 +12,7 @@ st.set_page_config(page_title="FDEP Flood Intelligence", layout="wide")
 
 def auth_ee():
     try:
-        # Attempt 1: Try default initialization (works in some envs)
+        # Attempt 1: Try default initialization
         ee.Initialize()
     except Exception:
         # Attempt 2: Load credentials from Secrets
