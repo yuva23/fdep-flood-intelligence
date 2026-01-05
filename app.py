@@ -8,12 +8,14 @@ import os
 import datetime
 
 # --- 1. CONFIGURATION & AUTH ---
-st.set_page_config(page_title="Global Flood Intelligence", layout="wide")
+st.set_page_config(page_title="FDEP Flood Intelligence", layout="wide")
 
 def auth_ee():
     try:
-        ee.Initialize(project='flood-intelligence-gee-12345')
+        # Try initializing with default credentials
+        ee.Initialize()
     except Exception:
+        # If that fails, manually rebuild credentials from Streamlit Secrets
         if "EARTHENGINE_TOKEN" in st.secrets:
             credentials_path = os.path.expanduser("~/.config/earthengine/")
             os.makedirs(credentials_path, exist_ok=True)
@@ -28,15 +30,13 @@ def auth_ee():
 
 auth_ee()
 
-# --- 2. DATA ARCHIVE (SIMPLE STRINGS ONLY) ---
-# We store dates as simple strings to avoid the "00:00:00" error
+# --- 2. DATA ARCHIVE ---
 flood_archive = {
     "2024": {
         "San Diego Flash Floods (Jan)": {"lat": 32.71, "lon": -117.16, "dates": ["2023-12-01", "2024-01-15", "2024-01-22", "2024-01-30"]},
         "Houston Floods (May)": {"lat": 29.76, "lon": -95.36, "dates": ["2024-04-01", "2024-04-15", "2024-05-02", "2024-05-10"]}
     },
     "2023": {
-        "Fort Lauderdale Flash Flood (Apr)": {"lat": 26.12, "lon": -80.14, "dates": ["2023-03-01", "2023-04-01", "2023-04-13", "2023-04-20"]},
         "Libya Dam Collapse (Sep)": {"lat": 32.76, "lon": 22.63, "dates": ["2023-08-01", "2023-09-01", "2023-09-12", "2023-09-20"]}
     },
     "2022": {
@@ -47,11 +47,10 @@ flood_archive = {
 }
 
 # --- 3. SIDEBAR CONTROLS ---
-st.sidebar.title("🌍 Global Flood Intelligence")
+st.sidebar.title("FDEP Flood Intelligence")
 
-# A. EVENT SELECTION
 st.sidebar.header("1. Select Event")
-selected_year = st.sidebar.selectbox("Year", list(flood_archive.keys()))
+selected_year = st.sidebar.selectbox("Year", list(flood_archive.keys()), index=2)
 event_list = list(flood_archive[selected_year].keys())
 selected_event_name = st.sidebar.selectbox("Event", event_list)
 
@@ -65,15 +64,13 @@ def make_date_obj(date_str):
 
 default_dates = [make_date_obj(x) for x in params["dates"]]
 
-# B. DATE SELECTION (The Fix)
-with st.sidebar.expander("📅 Date Settings", expanded=True):
+with st.sidebar.expander("Date Settings", expanded=False):
     col1, col2 = st.columns(2)
     d1 = col1.date_input("Before Start", default_dates[0])
     d2 = col2.date_input("Before End", default_dates[1])
     d3 = col1.date_input("After Start", default_dates[2])
     d4 = col2.date_input("After End", default_dates[3])
 
-# C. SENSOR & LAYERS
 st.sidebar.header("2. Sensor & Layers")
 sensor_type = st.sidebar.radio("Satellite", ["Sentinel-1 (Radar)", "Sentinel-2 (Optical)"])
 show_fdep = st.sidebar.checkbox("Overlay FDEP Conservation Lands", value=False)
@@ -82,18 +79,18 @@ show_fdep = st.sidebar.checkbox("Overlay FDEP Conservation Lands", value=False)
 if 'analysis_active' not in st.session_state:
     st.session_state.analysis_active = False
 
-if st.sidebar.button("Run Global Analysis", type="primary"):
+if st.sidebar.button("Run Analysis", type="primary"):
     st.session_state.analysis_active = True
 
 if st.session_state.analysis_active:
     st.subheader(f"Analysis: {selected_event_name}")
     
     with st.spinner('Processing Satellite Data...'):
-        roi = ee.Geometry.Point([lon, lat]).buffer(20000)
+        roi = ee.Geometry.Point([lon, lat]).buffer(10000)
         m = geemap.Map(center=[lat, lon], zoom=10)
         flooded_ha = 0
         
-        # CRITICAL FIX: Convert Date Objects back to String before sending to Google
+        # Date Strings for GEE
         start_b_str = d1.strftime("%Y-%m-%d")
         end_b_str = d2.strftime("%Y-%m-%d")
         start_a_str = d3.strftime("%Y-%m-%d")
@@ -105,7 +102,7 @@ if st.session_state.analysis_active:
                 fdep_url = "https://ca.dep.state.fl.us/arcgis/rest/services/OpenData/DSL_Cons_Lands/MapServer"
                 m.add_esri_layer(fdep_url, name="FDEP Conservation Lands", opacity=0.6)
             except:
-                st.warning("Could not load FDEP layer.")
+                pass
 
         # SENTINEL-1 (RADAR)
         if sensor_type == "Sentinel-1 (Radar)":
@@ -114,7 +111,7 @@ if st.session_state.analysis_active:
                         .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
                         .filter(ee.Filter.eq('instrumentMode', 'IW'))
                         .filterBounds(roi)
-                        .filterDate(start, end) # Passing clean strings now
+                        .filterDate(start, end)
                         .mosaic().clip(roi))
 
             before = get_sar(start_b_str, end_b_str)
@@ -138,7 +135,7 @@ if st.session_state.analysis_active:
             # Download Button
             try:
                 url = flood_final.getDownloadURL({'name': 'flood_map', 'scale': 30, 'region': roi})
-                st.sidebar.markdown(f"[📥 **Download GeoTIFF**]({url})")
+                st.sidebar.markdown(f"[Download GeoTIFF]({url})")
             except: pass
 
         # SENTINEL-2 (OPTICAL)
@@ -159,11 +156,11 @@ if st.session_state.analysis_active:
     m.to_streamlit(height=600)
     
     if sensor_type == "Sentinel-1 (Radar)":
-        st.success(f"🛑 Detected Flood Extent: {flooded_ha:.2f} Hectares")
+        st.success(f"Detected Flood Extent: {flooded_ha:.2f} Hectares")
 
     # --- AI SECTION ---
     st.divider()
-    st.subheader("🤖 AI Situation Report")
+    st.subheader("AI Situation Report")
     
     if "messages" not in st.session_state: st.session_state.messages = []
     for msg in st.session_state.messages: st.chat_message(msg["role"]).write(msg["content"])
