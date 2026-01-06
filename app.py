@@ -7,53 +7,35 @@ import json
 import os
 import datetime
 
-# --- 1. CONFIGURATION & AUTH ---
+# --- 1. CONFIGURATION & AUTH (THE FIX) ---
 st.set_page_config(page_title="FDEP Flood Intelligence", layout="wide")
 
 def auth_ee():
+    # FORCE the specific project ID
+    MY_PROJECT_ID = "flood-intelligence-gee-12345"
+    
     try:
-        # Attempt 1: Try default initialization
-        ee.Initialize()
+        # Option 1: Try initializing with the explicit project ID immediately
+        ee.Initialize(project=MY_PROJECT_ID)
     except Exception:
-        # Attempt 2: Load credentials from Secrets
+        # Option 2: If that fails, rebuild credentials from secrets
         if "EARTHENGINE_TOKEN" in st.secrets:
-            # A. Set up the credentials file
             credentials_path = os.path.expanduser("~/.config/earthengine/")
             os.makedirs(credentials_path, exist_ok=True)
             token_content = st.secrets["EARTHENGINE_TOKEN"]
             
-            # Ensure it is a string before writing
             if not isinstance(token_content, str):
                 token_content = json.dumps(token_content)
             
             with open(os.path.join(credentials_path, "credentials"), "w") as f:
                 f.write(token_content)
             
-            # B. Get the Project ID (CRITICAL STEP)
-            # We look for the new secret first
-            project_id = st.secrets.get("GOOGLE_PROJECT_ID")
-            
-            # If not in secrets, try to parse it from the token (fallback)
-            if not project_id:
-                try:
-                    token_dict = json.loads(token_content)
-                    project_id = token_dict.get("project_id")
-                except:
-                    pass
-
-            # C. Initialize with the explicit Project ID
-            if project_id:
-                try:
-                    ee.Initialize(project=project_id)
-                except Exception as e:
-                    st.error(f"Authentication Failed: Could not initialize with project '{project_id}'. Error: {e}")
-            else:
-                # Last resort: Try initializing without project (often fails on free tier)
-                try:
-                    ee.Initialize()
-                except Exception as e:
-                    st.error(f"Critical Error: No 'GOOGLE_PROJECT_ID' found in Secrets. Please add it to your Streamlit Secrets.")
-                    st.stop()
+            # CRITICAL: Initialize with the specific project ID
+            try:
+                ee.Initialize(project=MY_PROJECT_ID)
+            except Exception as e:
+                st.error(f"Authentication Failed: Could not connect to project '{MY_PROJECT_ID}'. Error: {e}")
+                st.stop()
         else:
             st.error("EARTHENGINE_TOKEN not found in Secrets!")
             st.stop()
